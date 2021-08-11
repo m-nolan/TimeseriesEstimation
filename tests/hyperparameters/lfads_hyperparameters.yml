@@ -1,0 +1,16 @@
+model:
+  dropout: 0.3
+  encoder_hidden_size: 64
+  encoder_num_layers: 3
+  encoder_bidirectional: True
+  generator_hidden_size: 64
+  generator_num_layers: 1
+  generator_bidirectional: False
+
+optimizer:
+  lr: 1e-3
+  lr_min: 1e-5
+  lr_factor: 0.9
+
+scheduler:
+  
