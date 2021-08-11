@@ -3,30 +3,11 @@
 Package containing pytorch-lightning models for time series data estimation tasks (reconstruction, prediction, forecasting, etc).
 """
 
-
-from os import stat
-import numpy as np
 import torch
 from torch.nn.modules.loss import _Loss
 import pytorch_lightning as pl
 
-from dataclasses import dataclass
-from typing import Any
-
-from torch.nn.modules.linear import Identity
-
-@dataclass
-class TimeseriesSample:
-    """ TimeseriesSample
-
-    Dataclass for timeseries estimation model outputs. Contains data tensor and dt float values.
-    """
-    data: torch.Tensor
-    latent: Any
-    dt: torch.float32
-#TODO move this to a data file with other LightningDataModules
-# also, do I need this?
-
+from .data import LfadsOutput
 
 class TimeseriesEstimator(pl.LightningModule):
     """TimeseriesEstimator
@@ -63,7 +44,6 @@ class TimeseriesEstimator(pl.LightningModule):
         return loss, loss_dict
 
     def training_step(self, batch, batch_idx):
-        #TODO: refactor this into a single _step method that all hooks call?
         loss, loss_dict = self._step(batch, batch_idx)
         return loss
 
@@ -75,6 +55,7 @@ class TimeseriesEstimator(pl.LightningModule):
         # model.eval() and torch.no_grad() are set before this hook is called.
         loss, loss_dict = self._step(batch, batch_idx)
         #TODO: add all other evaluation metrics here, do a nice composition here for those methods
+        # I will need to expand the _step() method to return the estimates for spectral estimates
         return loss
 
     def loss(self,pred,trg):
@@ -186,9 +167,7 @@ class Lfads(TimeseriesEstimator):
         generator_ic = generator_ic.reshape(batch_size,self.generator_out_scale*self.hparams.generator_num_layers,self.hparams.generator_hidden_size).permute(1,0,2)
         gen_out, gen_last = self.generator(torch.empty(batch_size,seq_len,1),self.dropout(generator_ic))
         out = self.gen2out(gen_out)
-        return (out, generator_ic_params)
-        #TODO: consider expanding the output to include the encoder, generator outputs.
-        # this would be a good use case for a dataclass instead of just a dict.
+        return LfadsOutput(out, generator_ic_params)
 
     @staticmethod
     def split_generator_ic_params(params: torch.Tensor):
@@ -198,8 +177,8 @@ class Lfads(TimeseriesEstimator):
         mean, logvar = torch.split(params,n_dist,dim=-1)
         return mean, logvar
 
-    @staticmethod
-    def sample_generator_ic(params: torch.Tensor):
+    @classmethod
+    def sample_generator_ic(cls, params: torch.Tensor):
         """sample_generator_ic
 
         Samples gaussian random values for a provided parameter tensor. Parameters are split evenly along the last dimension to create mean, logvariance values.
@@ -211,14 +190,13 @@ class Lfads(TimeseriesEstimator):
             sample (torch.Tensor): gaussian random samples drawn from distributions parameterized by input params.
         """
         # split the params into mean, logvar
-        mean, logvar = Lfads.split_generator_ic_params(params) # is this broken? should it be refactored?
+        mean, logvar = cls.split_generator_ic_params(params)
         sample = mean + torch.randn(mean.shape) * torch.exp(logvar).sqrt()
         return sample
     
     def loss(self, pred, trg: torch.Tensor):
-        est, generator_ic_params = pred
-        err = self.estimate_loss(est,trg)
-        kl_div = self.kl_weight*self.generator_ic_kl_div(generator_ic_params)
+        err = self.estimate_loss(pred.est,trg)
+        kl_div = self.kl_weight*self.generator_ic_kl_div(pred.generator_ic_params)
         gen_ih_l2_norm, gen_hh_l2_norm = self.generator_l2_norm()
         l2_norm = self.l2_weight*gen_hh_l2_norm
         total = err + kl_div + l2_norm
