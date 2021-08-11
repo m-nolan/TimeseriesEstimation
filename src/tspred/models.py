@@ -9,6 +9,8 @@ import pytorch_lightning as pl
 
 from .data import LfadsOutput
 
+
+# - - model classes - - #
 class TimeseriesEstimator(pl.LightningModule):
     """TimeseriesEstimator
 
@@ -61,34 +63,20 @@ class TimeseriesEstimator(pl.LightningModule):
     def loss(self,pred,trg):
         pass
 
-class Lfads(TimeseriesEstimator):
-    """LFADS: Latent Factor Analysis with Dynamical Systems
-
-    An all-to-all timeseries estimation model constructed from a pair of GRUs, encoder and generator.
-    The final encoder state is used to parameterize gaussian distributions from which generator initial conditions are sampled.
-    Generator output sequences are linearly combined to create the output estimate.
-
-    LFADS optimization is driven by a target reconstruction error objective (commonly MSE) and two regularization terms.
-    The first regularization is a variational restriction of the KL divergence between the distributions parameterized by encoder outputs and a prior distribution model.
-    The second regularization is a L2 norm on the generator parameters to restrict model complexity.
-
-    """
+class LfadsCell(torch.nn.modules.Module):
 
     def __init__(self, input_size: int, encoder_hidden_size: int, encoder_num_layers: int, encoder_bidirectional: bool,
-                 generator_hidden_size: int, generator_num_layers: int, generator_bidirectional: bool, dropout: float, 
-                 estimate_loss: _Loss):
-        
+             generator_hidden_size: int, generator_num_layers: int, generator_bidirectional: bool, dropout: float):
+             
         super().__init__()
-        
+
+        self.generator_num_layers = generator_num_layers
+        self.generator_hidden_size = generator_hidden_size # important for reshaping later
+
         # distribution priors
         self.prior_mean = torch.tensor(0.)
         self.prior_logvar = torch.tensor(1.)
-        self.l2_weight = 5e-2
-        self.kl_weight = 5e-2
         #TODO: turn this into an input argument
-
-        # assign loss function (composition!)
-        self.estimate_loss = estimate_loss
 
         # create dropout layer
         encoder_dropout = dropout
@@ -135,39 +123,17 @@ class Lfads(TimeseriesEstimator):
             dropout = generator_dropout,
             bidirectional = generator_bidirectional
         )
-        
-        # older LFADS models had intermediate outputs before computing poisson firing rates.
-        # this model maps the generator hidden states directly to the outputs.
-        
-        self.gen2out = torch.nn.Linear(
-            in_features = self.generator_out_scale * generator_hidden_size,
-            out_features = input_size,
-            bias = True
-        )
 
-        self.save_hyperparameters()
-        # note: all input arguments are saved into a `hparams` struct.
-        # access these values from self.hparams.input_features, etc
-
-    def forward(self,src: torch.Tensor):
-        """LFADS forward pass
-
-        Args:
-            src (torch.Tensor): LFADS source signal. [n_batch, seq_len, n_ch]
-
-        Returns:
-            pred (torch.tensor): LFADS signal estimate. Depending on the training task, this may be a reconstruction of the input src or a prediction of a separate target output (trg).
-        """
+    def forward(self, src: torch.Tensor):
         batch_size, seq_len, input_size = src.shape
         enc_out, enc_last = self.encoder(src)
         # enc_last = self.dropout(enc_last)
         enc_last = enc_last.permute(1,0,2).reshape(batch_size,-1)
         generator_ic_params = self.enc2gen(enc_last)
         generator_ic = self.sample_generator_ic(generator_ic_params)
-        generator_ic = generator_ic.reshape(batch_size,self.generator_out_scale*self.hparams.generator_num_layers,self.hparams.generator_hidden_size).permute(1,0,2)
+        generator_ic = generator_ic.reshape(batch_size,self.generator_out_scale*self.generator_num_layers,self.generator_hidden_size).permute(1,0,2)
         gen_out, gen_last = self.generator(torch.empty(batch_size,seq_len,1),self.dropout(generator_ic))
-        out = self.gen2out(gen_out)
-        return LfadsOutput(out, generator_ic_params)
+        return gen_out, generator_ic_params
 
     @staticmethod
     def split_generator_ic_params(params: torch.Tensor):
@@ -193,14 +159,6 @@ class Lfads(TimeseriesEstimator):
         mean, logvar = cls.split_generator_ic_params(params)
         sample = mean + torch.randn(mean.shape) * torch.exp(logvar).sqrt()
         return sample
-    
-    def loss(self, pred, trg: torch.Tensor):
-        err = self.estimate_loss(pred.est,trg)
-        kl_div = self.kl_weight*self.generator_ic_kl_div(pred.generator_ic_params)
-        gen_ih_l2_norm, gen_hh_l2_norm = self.generator_l2_norm()
-        l2_norm = self.l2_weight*gen_hh_l2_norm
-        total = err + kl_div + l2_norm
-        return total, {'err': err, 'kl_div': kl_div, 'l2_norm': l2_norm, 'total': total}
 
     def generator_ic_kl_div(self,generator_ic_params):
         post_mean, post_logvar = self.split_generator_ic_params(generator_ic_params)
@@ -218,6 +176,86 @@ class Lfads(TimeseriesEstimator):
         gen_hh_l2_norm = self.generator.weight_hh_l0.pow(2).sum().sqrt()
         return gen_ih_l2_norm, gen_hh_l2_norm
 
+class Lfads(TimeseriesEstimator):
+    """LFADS: Latent Factor Analysis with Dynamical Systems
+
+    An all-to-all timeseries estimation model constructed from a pair of GRUs, encoder and generator.
+    The final encoder state is used to parameterize gaussian distributions from which generator initial conditions are sampled.
+    Generator output sequences are linearly combined to create the output estimate.
+
+    LFADS optimization is driven by a target reconstruction error objective (commonly MSE) and two regularization terms.
+    The first regularization is a variational restriction of the KL divergence between the distributions parameterized by encoder outputs and a prior distribution model.
+    The second regularization is a L2 norm on the generator parameters to restrict model complexity.
+
+    """
+
+    def __init__(self, input_size: int, encoder_hidden_size: int, encoder_num_layers: int, encoder_bidirectional: bool,
+                 generator_hidden_size: int, generator_num_layers: int, generator_bidirectional: bool, dropout: float, 
+                 estimate_loss: _Loss):
+        
+        super().__init__()
+
+        # regularization weights
+        self.l2_weight = 5e-2
+        self.kl_weight = 5e-2
+        #TODO: move these to model inputs
+
+        # assign loss function (composition!)
+        self.estimate_loss = estimate_loss
+
+        self.lfads_cell = LfadsCell(input_size, encoder_hidden_size, encoder_num_layers, encoder_bidirectional,
+                                    generator_hidden_size, generator_num_layers, generator_bidirectional, dropout)
+        
+        # older LFADS models had intermediate outputs before computing poisson firing rates.
+        # this model maps the generator hidden states directly to the outputs.
+        
+        self.gen2out = torch.nn.Linear(
+            in_features = self.lfads_cell.generator_out_scale * generator_hidden_size,
+            out_features = input_size,
+            bias = True
+        )
+
+        self.save_hyperparameters()
+        # note: all input arguments are saved into a `hparams` struct.
+        # access these values from self.hparams.input_features, etc
+
+    def forward(self, src: torch.Tensor):
+        """LFADS forward pass
+
+        Args:
+            src (torch.Tensor): LFADS source signal. [n_batch, seq_len, n_ch]
+
+        Returns:
+            pred (torch.tensor): LFADS signal estimate. Depending on the training task, this may be a reconstruction of the input src or a prediction of a separate target output (trg).
+        """
+        gen_out, generator_ic_params = self.lfads_cell(src)
+        out = self.gen2out(gen_out)
+        return LfadsOutput(out, generator_ic_params)
+    
+    def loss(self, pred, trg: torch.Tensor):
+        err = self.estimate_loss(pred.est,trg)
+        kl_div = self.kl_weight*self.generator_ic_kl_div(pred.generator_ic_params)
+        gen_ih_l2_norm, gen_hh_l2_norm = self.generator_l2_norm()
+        l2_norm = self.l2_weight*gen_hh_l2_norm
+        total = err + kl_div + l2_norm
+        return total, {'err': err, 'kl_div': kl_div, 'l2_norm': l2_norm, 'total': total}
+
+    # for multiblock models, this can be expanded by looping across each cell in `lfads_cells`
+    def generator_ic_kl_div(self,generator_ic_params):
+        return self.lfads_cell.generator_ic_kl_div(generator_ic_params)
+
+    def generator_l2_norm(self):
+        """Computes the L2 norm of generator parameters
+
+        Returns:
+            gen_ih_l2_norm (torch.Tensor): L2 norm of input-hidden interaction matrices in LFADS GRU generator.
+            gen_hh_l2_norm (torch.Tensor): L2 norm of hidden-hidden interaction matrices in LFADS GRU generator.
+        """
+        return self.lfads_cell.generator_l2_norm()
+    #TODO: is there a smarter/prettier way to make these method passthroughs?
+
+
+# - - utils, etc - - #
 
 def kldiv_gaussian_gaussian(post_mu, post_lv, prior_mu, prior_lv):
     '''
