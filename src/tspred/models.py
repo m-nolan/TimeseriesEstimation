@@ -7,7 +7,7 @@ import torch
 from torch.nn.modules.loss import _Loss
 import pytorch_lightning as pl
 
-from .data import LfadsOutput
+from .data import TspredModelOutput, LfadsOutput
 
 
 # - - model classes - - #
@@ -36,7 +36,7 @@ class TimeseriesEstimator(pl.LightningModule):
         pass
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr = self.hparams['lr'])
+        optimizer = torch.optim.Adam([p for p in self.parameters() if p.needs_grad], lr = self.hparams['lr'])
         return optimizer
 
     def _step(self,batch,batch_idx):
@@ -60,10 +60,14 @@ class TimeseriesEstimator(pl.LightningModule):
         # I will need to expand the _step() method to return the estimates for spectral estimates
         return loss
 
-    def loss(self,pred,trg):
+    def loss(self, pred: TspredModelOutput, trg: torch.Tensor):
         pass
 
 class LfadsCell(torch.nn.modules.Module):
+    """LfadsCell
+
+    Individual encoder/generator module for larger LFADS models. Refactored to enable multicell composition.
+    """
 
     def __init__(self, input_size: int, encoder_hidden_size: int, encoder_num_layers: int, encoder_bidirectional: bool,
              generator_hidden_size: int, generator_num_layers: int, generator_bidirectional: bool, dropout: float):
@@ -125,6 +129,15 @@ class LfadsCell(torch.nn.modules.Module):
         )
 
     def forward(self, src: torch.Tensor):
+        """Forward pass method for an individual LFADS cell. Computes an output estimate of equal length to the input tensor src.
+
+        Args:
+            src (torch.Tensor): [n_batch, n_time, n_ch] tensor of timeseries data
+
+        Returns:
+            gen_out (torch.Tensor): LfadsCell generator outputs
+            generator_ic_params (torch.Tensor): n_batch x _ generator IC distribution parameters. Used for KL div. regularization
+        """
         batch_size, seq_len, input_size = src.shape
         enc_out, enc_last = self.encoder(src)
         # enc_last = self.dropout(enc_last)
@@ -137,6 +150,15 @@ class LfadsCell(torch.nn.modules.Module):
 
     @staticmethod
     def split_generator_ic_params(params: torch.Tensor):
+        """Splits generator initial condition distribution parameters into mean and log-variance values
+
+        Args:
+            params (torch.Tensor): [n_batch, 2*n_dir*n_layer*n_hidden] parameter tensor
+
+        Returns:
+            mean (torch.tensor): gaussian distribution mean parameters
+            logvar (torch.tensor): gaussian distribution logvar parameters
+        """
         batch_size, n_param = params.shape
         assert n_param % 2 == 0, f'params input not even in size, size {n_param}'
         n_dist = n_param // 2
@@ -161,6 +183,14 @@ class LfadsCell(torch.nn.modules.Module):
         return sample
 
     def generator_ic_kl_div(self,generator_ic_params):
+        """Compute variational constraint (KL div.) from generator I.C. parameters
+
+        Args:
+            generator_ic_params (torch.Tensor): [n_batch, 2*n_dir*n_layer*n_hidden] parameter tensor
+
+        Returns:
+            kl_div (torch.Tensor): Singleton value measuring divergence of the current distribution estimate from the model prior.
+        """
         post_mean, post_logvar = self.split_generator_ic_params(generator_ic_params)
         kl_div = kldiv_gaussian_gaussian(post_mean, post_logvar, self.prior_mean, self.prior_logvar)
         return kl_div
@@ -232,7 +262,17 @@ class Lfads(TimeseriesEstimator):
         out = self.gen2out(gen_out)
         return LfadsOutput(out, generator_ic_params)
     
-    def loss(self, pred, trg: torch.Tensor):
+    def loss(self, pred: LfadsOutput, trg: torch.Tensor):
+        """Compute the LFADS model loss objective for a given prediction and target pair.
+
+        Args:
+            pred (LfadsOutput): Output struct containing the estimate (est) and generator IC parameters
+            trg (torch.Tensor): Target sequence that pred.est estimates
+
+        Returns:
+            total (torch.Tensor): Total LFADS loss objective
+            loss_dict (dict): Dictionary of individual loss objective terms: err, kl_div, l2_norm, total.
+        """
         err = self.estimate_loss(pred.est,trg)
         kl_div = self.kl_weight*self.generator_ic_kl_div(pred.generator_ic_params)
         gen_ih_l2_norm, gen_hh_l2_norm = self.generator_l2_norm()
