@@ -159,6 +159,20 @@ class Mvar(TimeseriesEstimator):
     def loss(self, pred: TspredModelOutput, trg: torch.Tensor):
         loss = self.estimate_loss(pred.est,trg)
         return loss, {'loss', loss}
+
+
+# - - S4ID implementation (Subspace linear system ID) - - #
+
+class S4Id(TimeseriesEstimator):
+
+    def __init__():
+        pass
+
+    def forward():
+        pass
+
+    def loss():
+        pass
         
 
 # - - LFADS implementations - - #
@@ -323,6 +337,12 @@ class LfadsCell(nn.Module):
         gen_ih_l2_norm = self.generator.weight_ih_l0.pow(2).sum().sqrt()
         gen_hh_l2_norm = self.generator.weight_hh_l0.pow(2).sum().sqrt()
         return gen_ih_l2_norm, gen_hh_l2_norm
+
+    def update_kl_weight(self,epoch):
+        pass
+
+    def update_l2_weight(self,epoch):
+        pass
 
 #TODO: This is a massive class duplication. I should merge this with the original Lfads class.
 # What I don't want is a bunch of if/elses in the class methods though. Will revisit.
@@ -506,13 +526,12 @@ class Lfads(TimeseriesEstimator):
 
     def __init__(self, input_size: int, encoder_hidden_size: int, encoder_num_layers: int, encoder_bidirectional: bool,
                  generator_hidden_size: int, generator_num_layers: int, generator_bidirectional: bool, dropout: float, 
-                 generator_ic_prior: LfadsGeneratorICPrior, estimate_loss: _Loss, optimizer_hparams: dict):
+                 generator_ic_prior: LfadsGeneratorICPrior, estimate_loss: _Loss, objective_hparams: dict, optimizer_hparams: dict):
         
         super().__init__(optimizer_hparams = optimizer_hparams)
 
         # regularization weights
-        self.l2_weight = 5e-2
-        self.kl_weight = 5e-2
+        self.objective_hparams = objective_hparams
         #TODO: move these to model inputs
 
         # assign loss function (composition!)
@@ -561,15 +580,32 @@ class Lfads(TimeseriesEstimator):
         """
         est_nan_trials = pred.est.reshape(pred.est.shape[0],-1).isnan().sum(dim=-1) > 0
         err = self.estimate_loss(pred.est[~est_nan_trials,],trg[~est_nan_trials,])
-        kl_div = self.kl_weight*self.generator_ic_kl_div(pred.generator_ic_params)
+        kl_div = self.objective_hparams['kl']['weight']*self.generator_ic_kl_div(pred.generator_ic_params)
         gen_ih_l2_norm, gen_hh_l2_norm = self.generator_l2_norm()
-        l2_norm = self.l2_weight*gen_hh_l2_norm
+        l2_norm = self.objective_hparams['l2']['weight']*gen_hh_l2_norm
         total = err + kl_div + l2_norm
         return total, {'err': err, 'kl_div': kl_div, 'l2_norm': l2_norm, 'total': total}
 
     def validation_epoch_end(self, outputs):
         # update KL, L2 weight scales here
-        pass
+        self.update_kl_weight(self.current_epoch)
+        self.update_l2_weight(self.current_epoch)
+
+    def _update_regularizer_weight(self,key,epoch):
+        kwd = self.objective_hparams[key] # key weight dict
+        weight_step = max(epoch - kwd['schedule_start'], 0)
+        gated_weight_update = min(
+            kwd['max'] * weight_step / kwd['schedule_dur'],
+            kwd['max']
+        )
+        self.objective_hparams[key]['weight'] = max(gated_weight_update, kwd['min'])
+        #TODO: this is highly reliant on a known dict structure. This might benefit from a more static dataclass for reg. weights
+
+    def update_kl_weight(self,epoch):
+        self._update_regularizer_weight('kl',epoch)
+
+    def update_l2_weight(self,epoch):
+        self._update_regularizer_weight('l2',epoch)
 
     # for multiblock models, this can be expanded by looping across each cell in `lfads_cells`
     def generator_ic_kl_div(self,generator_ic_params):
