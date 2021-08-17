@@ -23,14 +23,39 @@ class TspredModelOutput(ABC):
     Abstract base dataclass for model outputs. Implements a single output estimate value (est).
 
     Inheriting classes should add values as required. See LfadsOutput for a simple example.
+
+    Args:
+        est (torch.Tensor): output timeseries estimate from a tspred model.
     """
     
     est: torch.Tensor
 
 @dataclass
 class LfadsOutput(TspredModelOutput):
+    """LfadsOutput
+
+    Args:
+        est (torch.Tensor): [n_batch, n_sample, n_channel] timeseries data estimate produced from LFADS models
+        generator_ic_params (torch.Tensor): [n_batch, D*n_hidden*n_layer] torch
+    """
 
     generator_ic_params: torch.Tensor
+
+@dataclass
+class LfadsGeneratorICPrior:
+    """LfadsGeneratorICPrior:
+
+    Args:
+        mean (torch.float32): prior distribution mean value
+        logvar (torch.float32): prior distribution log variance
+        mean_opt (bool): switches model optimization of the prior distribution mean value (default: False)
+        logvar_opt (bool): switches model optimization of the prior distribution log variance value (default: False)
+    """
+
+    mean: torch.float32
+    logvar: torch.float32
+    mean_opt: bool = False
+    logvar_opt: bool = False
 
 
 # - - datasets - - #
