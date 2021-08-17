@@ -100,7 +100,7 @@ class MvarCell(nn.Module):
             src (torch.Tensor): [n_batch, ar_order, input_size] tensor of inputs
 
         Returns:
-            out (torch.Tensor): [n_batch, 1, input_size] tensor of outputs
+            out (torch.Tensor): [n_batch, input_size] tensor of outputs for the next time point
         """
         out = torch.zeros(src.shape[0],src.shape[-1])
         for p_idx, layer in enumerate(self.layers):
@@ -143,7 +143,7 @@ class Mvar(TimeseriesEstimator):
         est = torch.zeros(src.shape)
         for t_idx in range(self.ar_order,n_time):
             est[:,t_idx,:] = self.ar_cell(src[:,(t_idx-self.ar_order):t_idx,:])
-        est[:,:t_idx,:] = est[:,t_idx,:]
+        est[:,:self.ar_order,:] = est[:,self.ar_order,:].unsqueeze(1)
 
         return TspredModelOutput(est=est)
 
@@ -155,6 +155,10 @@ class Mvar(TimeseriesEstimator):
             n_out (int): number of time steps to predict
         """
         pass
+
+    def loss(self, pred: TspredModelOutput, trg: torch.Tensor):
+        loss = self.estimate_loss(pred.est,trg)
+        return loss, {'loss', loss}
         
 
 # - - LFADS implementations - - #
