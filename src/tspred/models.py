@@ -75,7 +75,90 @@ class TimeseriesEstimator(pl.LightningModule):
     def loss(self, pred: TspredModelOutput, trg: torch.Tensor):
         pass
 
-class LfadsCell(torch.nn.modules.Module):
+class MvarCell(nn.Module):
+    """Multivariate Autoregression model (MVAR) cell. Computes forward pass of a single time window.
+
+    Args:
+        input_size (int): input dimension
+        ar_order (int): order of MVAR model. Sum of linear xforms
+    """
+
+    def __init__(self, input_size: int, ar_order: int):
+        super().__init__()
+
+        self.input_size = input_size
+        self.ar_order = ar_order
+
+        self.layers = nn.ModuleList(
+            [nn.Linear(in_features=input_size,out_features=input_size,bias=False) for _ in range(ar_order)]
+        )
+    
+    def forward(self, src: torch.Tensor):
+        """MVAR cell forward method. Computes the next output from an ORDER-length initialization.
+
+        Args:
+            src (torch.Tensor): [n_batch, ar_order, input_size] tensor of inputs
+
+        Returns:
+            out (torch.Tensor): [n_batch, 1, input_size] tensor of outputs
+        """
+        out = torch.zeros(src.shape[0],src.shape[-1])
+        for p_idx, layer in enumerate(self.layers):
+            out += layer(src[:,p_idx,:])
+
+        return out
+
+class Mvar(TimeseriesEstimator):
+    """Multivariate Autoregression model (MVAR) built in the TimeseriesEstimator framework.
+
+    Args:
+        input_size (int): input dimension
+        ar_order (int): order of MVAR model. Sum of linear xforms
+        estimate_loss (_Loss): loss functional for assessing reconstruction accuracy
+        optimizer_hyperparams (dict): dictionary of ADAM optimization hyperparameters
+    """
+
+    def __init__(self, input_size: int, ar_order: int, estimate_loss: _Loss, optimizer_hparams: dict):
+        super().__init__(optimizer_hparams = optimizer_hparams)
+
+        self.input_size = input_size
+        self.ar_order = ar_order
+        self.estimate_loss = estimate_loss
+        
+        # create MVAR stack
+        self.ar_cell = MvarCell(input_size=input_size, ar_order=ar_order)
+
+    def forward(self, src: torch.Tensor):
+        """Forward method for MVAR model. Computes an output estimate for each time point as a linear combination of the previous ar_order time points.
+
+        Args:
+            src (torch.Tensor): [n_batch, n_time, input_size] tensor containing a multidimensional source signal
+
+        Returns:
+            est (TspredModelOutput): TspredModelOutput object containing the output estimate
+        """
+
+        # loop across time points to compute output estimate
+        n_batch, n_time, _ = src.shape
+        est = torch.zeros(src.shape)
+        for t_idx in range(self.ar_order,n_time):
+            est[:,t_idx,:] = self.ar_cell(src[:,(t_idx-self.ar_order):t_idx,:])
+        est[:,:t_idx,:] = est[:,t_idx,:]
+
+        return TspredModelOutput(est=est)
+
+    def forecast(self, init: torch.Tensor, n_out: int):
+        """MVAR signal forecast. Predict the next n_out time steps from the I.C. init.
+
+        Args:
+            init (torch.Tensor): [n_batch, ar_order, input_size] tensor defining the initial condition
+            n_out (int): number of time steps to predict
+        """
+        pass
+        
+
+# - - LFADS implementations - - #
+class LfadsCell(nn.Module):
     """LfadsCell
 
     Individual encoder/generator module for larger LFADS models. Refactored to enable multicell composition.
@@ -237,6 +320,8 @@ class LfadsCell(torch.nn.modules.Module):
         gen_hh_l2_norm = self.generator.weight_hh_l0.pow(2).sum().sqrt()
         return gen_ih_l2_norm, gen_hh_l2_norm
 
+#TODO: This is a massive class duplication. I should merge this with the original Lfads class.
+# What I don't want is a bunch of if/elses in the class methods though. Will revisit.
 class LfadsCellModifiedGru(torch.nn.modules.Module):
     """LfadsCell
 
