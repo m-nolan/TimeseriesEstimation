@@ -7,6 +7,7 @@ from typing import Optional
 
 import torch
 from torch import optim
+from torch._C import device
 import torch.nn as nn
 from torch.nn.modules.loss import _Loss
 import pytorch_lightning as pl
@@ -298,7 +299,7 @@ class LfadsCell(nn.Module):
         """
         # split the params into mean, logvar
         mean, logvar = self.split_generator_ic_params(params)
-        sample = mean + torch.randn(mean.shape, device=self.device) * torch.exp(logvar).sqrt()
+        sample = mean + torch.randn(mean.shape).type_as(mean) * torch.exp(logvar).sqrt()
         return sample
 
     def initialize_generator_ic_prior(self,generator_ic_prior: LfadsGeneratorICPrior):
@@ -337,15 +338,9 @@ class LfadsCell(nn.Module):
         gen_hh_l2_norm = self.generator.weight_hh_l0.pow(2).sum().sqrt()
         return gen_ih_l2_norm, gen_hh_l2_norm
 
-    def update_kl_weight(self,epoch):
-        pass
-
-    def update_l2_weight(self,epoch):
-        pass
-
 #TODO: This is a massive class duplication. I should merge this with the original Lfads class.
 # What I don't want is a bunch of if/elses in the class methods though. Will revisit.
-class LfadsCellModifiedGru(pl.LightningModule):
+class LfadsCellModifiedGru(nn.Module):
     """LfadsCell
 
     Individual encoder/generator module for larger LFADS models. Refactored to enable multicell composition.
@@ -381,7 +376,7 @@ class LfadsCellModifiedGru(pl.LightningModule):
             batch_first = True,
             dropout = encoder_dropout,
             bidirectional = encoder_bidirectional,
-            bias = False
+            bias = False,
         )
         
         # encoder outputs are split into the mean and logvar of gaussian distributions
@@ -394,7 +389,7 @@ class LfadsCellModifiedGru(pl.LightningModule):
             self.enc2gen = torch.nn.Linear(
                 in_features = encoder_state_size,
                 out_features = generator_ic_param_size,
-                bias = False
+                bias = False,
             )
         #TODO: ^ wrap this into a simpler "encoder output to generator IC" module
 
@@ -405,7 +400,7 @@ class LfadsCellModifiedGru(pl.LightningModule):
             num_layers = generator_num_layers,
             batch_first = True,
             dropout = generator_dropout,
-            bias = False
+            bias = False,
         )
 
         # initialize distribution priors
@@ -431,7 +426,8 @@ class LfadsCellModifiedGru(pl.LightningModule):
         generator_ic_params = self.enc2gen(enc_last)
         generator_ic = self.sample_generator_ic(generator_ic_params)
         generator_ic = generator_ic.reshape(batch_size,self.generator_out_scale*self.generator_num_layers,self.generator_hidden_size).permute(1,0,2)
-        gen_out, gen_last = self.generator(torch.empty(batch_size,seq_len,self.generator_input_size,device=self.device),self.dropout(generator_ic))
+        gen_input = torch.empty(batch_size,seq_len,self.generator_input_size).type_as(generator_ic)
+        gen_out, gen_last = self.generator(gen_input,self.dropout(generator_ic))
         gen_out = gen_out.clamp(min=-self.clip_val, max=self.clip_val)
         return gen_out, generator_ic_params
 
@@ -465,7 +461,7 @@ class LfadsCellModifiedGru(pl.LightningModule):
         """
         # split the params into mean, logvar
         mean, logvar = self.split_generator_ic_params(params)
-        z_sample = torch.randn(mean.shape,device=self.device)
+        z_sample = torch.randn(mean.shape).type_as(mean)
         return mean + z_sample * torch.exp(logvar).sqrt()
 
     def initialize_generator_ic_prior(self,generator_ic_prior: LfadsGeneratorICPrior):
@@ -528,11 +524,9 @@ class Lfads(TimeseriesEstimator):
 
         # regularization weights
         self.objective_hparams = objective_hparams
-        #TODO: move these to model inputs
 
         # assign loss function (composition!)
         self.estimate_loss = estimate_loss
-
         self.lfads_cell = LfadsCellModifiedGru(input_size, encoder_hidden_size, encoder_num_layers, encoder_bidirectional,
                                     generator_hidden_size, generator_num_layers, generator_bidirectional, 
                                     generator_ic_prior, dropout)
@@ -620,7 +614,7 @@ class Lfads(TimeseriesEstimator):
 
 # - - GRU modifications - - #
 
-class GruModified(pl.LightningModule):
+class GruModified(nn.Module):
     """GRU Modified
 
     Collection of layered GRU cells, modified with update-bias (see GRUCellModified)
@@ -694,13 +688,13 @@ class GruModified(pl.LightningModule):
             h0 = h0.reshape(n_batch,-1)
         
         # preallocate hidden state activity
-        hidden = torch.zeros(n_step, n_batch, self.hidden_size, device=self.device)
+        hidden = torch.zeros(n_step, n_batch, self.hidden_size).type_as(input)
         for idx in range(n_step):
             _hidden = h0 if idx == 0 else hidden[idx-1,:,:]
-            _hidden_next = torch.zeros(n_batch, self.num_layers * self.hidden_size, device=self.device)
+            _hidden_next = torch.zeros(n_batch, self.num_layers * self.hidden_size).type_as(input)
             _in = input[idx,]
             for layer_idx, mod in enumerate(self.gru_layers):
-                _hout_idx_range = torch.arange(layer_idx*self.hidden_size,(layer_idx+1)*self.hidden_size,device=self.device)
+                _hout_idx_range = torch.arange(layer_idx*self.hidden_size,(layer_idx+1)*self.hidden_size)
                 if layer_idx > 0:
                     _in = self.dropout_layers[layer_idx-1](_in)
                 _hidden_next[:,_hout_idx_range] = mod(_in, _hidden[:,_hout_idx_range])

@@ -8,6 +8,7 @@
 Template script for training an LFADS model to reconstruct data samples from the goose-wireless 250Hz dataset
 """
 
+from torch._C import device
 import tspred
 import torch
 import pytorch_lightning as pl
@@ -60,6 +61,7 @@ def get_lfads_model(hparams,input_size):
 def main(*args,**kwargs):
     # parse command line arguments
 
+
     # load hyperparameter file
     hparam_filepath = r'D:\Users\mickey\aoLab\code\timeseries_prediction\tests\hyperparameters\lfads_hyperparameters.yml'
     hparams = load_hyperparameters(hparam_filepath)
@@ -76,11 +78,12 @@ def main(*args,**kwargs):
     #TODO: add these
 
     # create trainer
+    gpus = 1
     trainer = pl.Trainer(
         gradient_clip_val = hparams['trainer']['gradient_clip_val'],
         gradient_clip_algorithm = hparams ['trainer']['gradient_clip_algorithm'],
         max_epochs = hparams['trainer']['max_epochs'],
-        gpus = 1
+        gpus = gpus
     )
 
     # train
