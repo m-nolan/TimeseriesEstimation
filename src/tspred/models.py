@@ -285,8 +285,7 @@ class LfadsCell(nn.Module):
         mean, logvar = torch.split(params,n_dist,dim=-1)
         return mean, logvar
 
-    @classmethod
-    def sample_generator_ic(cls, params: torch.Tensor):
+    def sample_generator_ic(self, params: torch.Tensor):
         """sample_generator_ic
 
         Samples gaussian random values for a provided parameter tensor. Parameters are split evenly along the last dimension to create mean, logvariance values.
@@ -298,8 +297,8 @@ class LfadsCell(nn.Module):
             sample (torch.Tensor): gaussian random samples drawn from distributions parameterized by input params.
         """
         # split the params into mean, logvar
-        mean, logvar = cls.split_generator_ic_params(params)
-        sample = mean + torch.randn(mean.shape) * torch.exp(logvar).sqrt()
+        mean, logvar = self.split_generator_ic_params(params)
+        sample = mean + torch.randn(mean.shape, device=self.device) * torch.exp(logvar).sqrt()
         return sample
 
     def initialize_generator_ic_prior(self,generator_ic_prior: LfadsGeneratorICPrior):
@@ -346,7 +345,7 @@ class LfadsCell(nn.Module):
 
 #TODO: This is a massive class duplication. I should merge this with the original Lfads class.
 # What I don't want is a bunch of if/elses in the class methods though. Will revisit.
-class LfadsCellModifiedGru(torch.nn.modules.Module):
+class LfadsCellModifiedGru(pl.LightningModule):
     """LfadsCell
 
     Individual encoder/generator module for larger LFADS models. Refactored to enable multicell composition.
@@ -432,10 +431,8 @@ class LfadsCellModifiedGru(torch.nn.modules.Module):
         generator_ic_params = self.enc2gen(enc_last)
         generator_ic = self.sample_generator_ic(generator_ic_params)
         generator_ic = generator_ic.reshape(batch_size,self.generator_out_scale*self.generator_num_layers,self.generator_hidden_size).permute(1,0,2)
-        gen_out, gen_last = self.generator(torch.empty(batch_size,seq_len,self.generator_input_size),self.dropout(generator_ic))
+        gen_out, gen_last = self.generator(torch.empty(batch_size,seq_len,self.generator_input_size,device=self.device),self.dropout(generator_ic))
         gen_out = gen_out.clamp(min=-self.clip_val, max=self.clip_val)
-        if gen_out.isnan().any():
-            breakpoint()
         return gen_out, generator_ic_params
 
     @staticmethod
@@ -455,8 +452,7 @@ class LfadsCellModifiedGru(torch.nn.modules.Module):
         mean, logvar = torch.split(params,n_dist,dim=-1)
         return mean, logvar
 
-    @classmethod
-    def sample_generator_ic(cls, params: torch.Tensor):
+    def sample_generator_ic(self, params: torch.Tensor):
         """sample_generator_ic
 
         Samples gaussian random values for a provided parameter tensor. Parameters are split evenly along the last dimension to create mean, logvariance values.
@@ -468,9 +464,9 @@ class LfadsCellModifiedGru(torch.nn.modules.Module):
             sample (torch.Tensor): gaussian random samples drawn from distributions parameterized by input params.
         """
         # split the params into mean, logvar
-        mean, logvar = cls.split_generator_ic_params(params)
-        sample = mean + torch.randn(mean.shape) * torch.exp(logvar).sqrt()
-        return sample
+        mean, logvar = self.split_generator_ic_params(params)
+        z_sample = torch.randn(mean.shape,device=self.device)
+        return mean + z_sample * torch.exp(logvar).sqrt()
 
     def initialize_generator_ic_prior(self,generator_ic_prior: LfadsGeneratorICPrior):
         # initialize mean
@@ -624,7 +620,7 @@ class Lfads(TimeseriesEstimator):
 
 # - - GRU modifications - - #
 
-class GruModified(nn.Module):
+class GruModified(pl.LightningModule):
     """GRU Modified
 
     Collection of layered GRU cells, modified with update-bias (see GRUCellModified)
@@ -698,13 +694,13 @@ class GruModified(nn.Module):
             h0 = h0.reshape(n_batch,-1)
         
         # preallocate hidden state activity
-        hidden = torch.zeros(n_step, n_batch, self.hidden_size)
+        hidden = torch.zeros(n_step, n_batch, self.hidden_size, device=self.device)
         for idx in range(n_step):
             _hidden = h0 if idx == 0 else hidden[idx-1,:,:]
-            _hidden_next = torch.zeros(n_batch, self.num_layers * self.hidden_size)
+            _hidden_next = torch.zeros(n_batch, self.num_layers * self.hidden_size, device=self.device)
             _in = input[idx,]
             for layer_idx, mod in enumerate(self.gru_layers):
-                _hout_idx_range = torch.arange(layer_idx*self.hidden_size,(layer_idx+1)*self.hidden_size)
+                _hout_idx_range = torch.arange(layer_idx*self.hidden_size,(layer_idx+1)*self.hidden_size,device=self.device)
                 if layer_idx > 0:
                     _in = self.dropout_layers[layer_idx-1](_in)
                 _hidden_next[:,_hout_idx_range] = mod(_in, _hidden[:,_hout_idx_range])

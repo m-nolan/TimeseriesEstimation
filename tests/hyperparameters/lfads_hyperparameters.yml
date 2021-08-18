@@ -1,16 +1,63 @@
+# example hyperparameter definitions for the tspred LFADS model
+
+# datamodule hyperparameters
+datamodule:
+  src_len: 50
+  trg_len: 50
+  batch_size: 256
+
+# model hyperparamters
 model:
-  dropout: 0.3
+  name: Lfads # this is currently the class name, might want a different ID
+  # encoder hyperparameters (GRU)
   encoder_hidden_size: 64
   encoder_num_layers: 3
   encoder_bidirectional: True
+  # decoder hyperparameters (GRU)
   generator_hidden_size: 64
   generator_num_layers: 1
   generator_bidirectional: False
+  # generator IC prior hyperparameters (gaussian)
+  generator_ic_prior:
+    mean: 0 # these were previously set to "learnable" here, but perhaps that should be in the script?
+    logvar: 1
+  # misc
+  dropout: 0.3
 
+# Lfads objective (loss + regularization) weights
+objective: #TODO: rename this?
+  kl:
+    weight : 0.0
+    min: 0.0
+    max: 0.05 # subject to hyperparameter optimization
+    schedule_dur: 1600
+    schedule_start: 0
+  l2:
+    weight: 0.0
+    min: 0.0
+    max: 0.05
+    schedule_dur: 1600
+    schedule_start: 0.0
+  l2_con_scale: 0
+  l2_gen_scale: 2000
+
+# ADAM optimizer hyperparameters
 optimizer:
-  lr: 1e-3
-  lr_min: 1e-5
-  lr_factor: 0.9
+  lr: 0.001
+  betas: !!python/tuple
+  - 0.9
+  - 0.99
+  eps: 0.1
 
+# LRReduceOnPlateau scheduler hyperparameters
 scheduler:
-  
+  lr_min: 1.0e-05
+  scheduler_factor: 0.95
+  scheduler_patience: 6
+  scheduler_cooldown: 0
+
+# Pytorch-Lightning trainer hyperparamters
+trainer:
+  gradient_clip_val: 200
+  gradient_clip_algorithm: value
+  max_epochs: 1

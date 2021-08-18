@@ -1,0 +1,27 @@
+# example hyperparameter definitions for the tspred LFADS model
+
+# model hyperparamters
+model:
+  name: Mvar # this is currently the class name, might want a different ID
+  # MVAR hyperparameters
+  ar_order: 10
+
+# ADAM optimizer hyperparameters
+optimizer:
+  lr: 0.001
+  betas: !!python/tuple
+  - 0.9
+  - 0.99
+  eps: 0.1
+
+# LRReduceOnPlateau scheduler hyperparameters
+scheduler:
+  lr_min: 1.0e-05
+  scheduler_factor: 0.95
+  scheduler_patience: 6
+  scheduler_cooldown: 0
+
+# Pytorch-Lightning trainer hyperparamters
+trainer:
+  gradient_clip_val: 50
+  gradient_clip_algorithm: value

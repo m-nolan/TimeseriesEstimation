@@ -96,7 +96,7 @@ class GW250(pl.LightningDataModule):
         
         Data is sampled at 250Hz. No BPF beyond decimation required during downsampling from 1kHz. Dataset has a fixed 80:10:10::train:val:test split.
     '''
-    def __init__(self, src_len, trg_len, batch_size, transforms=None, data_device='cpu'):
+    def __init__(self, src_len: int, trg_len: int, batch_size: int, transforms=None, data_device: str='cpu', num_workers: int=4):
         super().__init__()
 
         self.src_len    = src_len
@@ -116,6 +116,7 @@ class GW250(pl.LightningDataModule):
         )
         self.transforms     = transforms
         self.data_device    = data_device   # I want to keep the data tensors on the CPU, then read batches to the GPU.
+        self.num_workers    = num_workers
 
     def prepare_data(self): # run once. 
         assert os.path.exists(self.file_path), "Dataset file not found, check file path string"
@@ -145,10 +146,10 @@ class GW250(pl.LightningDataModule):
         )#.to(self.data_device)
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.num_workers)
     
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_workers)
     
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size)
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers)
