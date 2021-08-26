@@ -1,20 +1,21 @@
-# example hyperparameter definitions for the tspred LFADS model
+# example hyperparameter definitions for the tspred LFADS model experiment
 
 # datamodule hyperparameters
 datamodule:
+  name: gw250
   src_len: 50
   trg_len: 50
-  batch_size: 256
+  batch_size: 750
 
 # model hyperparamters
 model:
   name: Lfads # this is currently the class name, might want a different ID
   # encoder hyperparameters (GRU)
-  encoder_hidden_size: 64
-  encoder_num_layers: 3
+  encoder_hidden_size: 1024
+  encoder_num_layers: 1
   encoder_bidirectional: True
   # decoder hyperparameters (GRU)
-  generator_hidden_size: 64
+  generator_hidden_size: 1024
   generator_num_layers: 1
   generator_bidirectional: False
   # generator IC prior hyperparameters (gaussian)
@@ -26,6 +27,7 @@ model:
 
 # Lfads objective (loss + regularization) weights
 objective: #TODO: rename this?
+  name: MSELoss
   kl:
     weight : 0.0
     min: 0.0
@@ -38,26 +40,24 @@ objective: #TODO: rename this?
     max: 0.05
     schedule_dur: 1600
     schedule_start: 0.0
-  l2_con_scale: 0
-  l2_gen_scale: 2000
 
 # ADAM optimizer hyperparameters
 optimizer:
+  name: ADAM
   lr: 0.001
   betas: !!python/tuple
   - 0.9
   - 0.99
   eps: 0.1
-
-# LRReduceOnPlateau scheduler hyperparameters
-scheduler:
-  lr_min: 1.0e-05
-  scheduler_factor: 0.95
-  scheduler_patience: 6
-  scheduler_cooldown: 0
+  scheduler: ReduceLROnPlateau
+  min_lr: 1.0e-05
+  factor: 0.95
+  patience: 6
+  cooldown: 0
 
 # Pytorch-Lightning trainer hyperparamters
 trainer:
   gradient_clip_val: 200
   gradient_clip_algorithm: value
-  max_epochs: 1
+  min_epochs: 100
+  max_epochs: 500

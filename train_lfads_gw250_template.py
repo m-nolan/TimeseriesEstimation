@@ -8,15 +8,19 @@
 Template script for training an LFADS model to reconstruct data samples from the goose-wireless 250Hz dataset
 """
 
-from torch._C import device
 import tspred
 import torch
 import pytorch_lightning as pl
 import os
+from pathlib import Path
 import yaml
+import argparse
 
 def parse_cl_args():
-    pass
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--hparam_filepath', type=str, default=r'D:\Users\mickey\aoLab\code\timeseries_prediction\tests\hyperparameters\lfads_hyperparameters.yml')
+    parser.add_argument('--root_dir', type=str, default=r'D:\Users\mickey\Data\models\pytorch-lightning')
+    return parser.parse_args()
 
 def load_hyperparameters(hparam_filepath):
     assert os.path.exists(hparam_filepath), f'hyperparameter file not found: {hparam_filepath}'
@@ -58,13 +62,17 @@ def get_lfads_model(hparams,input_size):
         optimizer_hparams = hparams['optimizer'],
     )
 
-def main(*args,**kwargs):
+def main():
     # parse command line arguments
-
+    cl_args = parse_cl_args()
 
     # load hyperparameter file
-    hparam_filepath = r'D:\Users\mickey\aoLab\code\timeseries_prediction\tests\hyperparameters\lfads_hyperparameters.yml'
-    hparams = load_hyperparameters(hparam_filepath)
+    hparams = load_hyperparameters(cl_args.hparam_filepath)
+
+    # set, create experiment directory
+    root_dir = tspred.utils.create_model_pathstr(hparams)
+    root_dir = os.path.join(cl_args.root_dir,root_dir)
+    Path(root_dir).mkdir(mode = 0o007, parents=True, exist_ok=True)
     
     # create datamodule
     gw250 = get_gw250_datamodule(hparams)
@@ -75,15 +83,26 @@ def main(*args,**kwargs):
     print(model)
 
     # create training callbacks (checkpoints)
-    #TODO: add these
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        monitor = 'avg_valid_loss',
+        filename = 'lfads-{epoch:03d}-{val_loss:.3f}',
+        save_last = True
+    )
+    early_stopping_callback = pl.callbacks.early_stopping.EarlyStopping(
+        monitor ='avg_valid_loss'
+    )
 
     # create trainer
     gpus = 1
     trainer = pl.Trainer(
+        auto_scale_batch_size = False, # this does not work for external datamodules.
         gradient_clip_val = hparams['trainer']['gradient_clip_val'],
         gradient_clip_algorithm = hparams ['trainer']['gradient_clip_algorithm'],
+        min_epochs = hparams['trainer']['min_epochs'],
         max_epochs = hparams['trainer']['max_epochs'],
-        gpus = gpus
+        default_root_dir = root_dir,
+        gpus = gpus,
+        callbacks=[checkpoint_callback, early_stopping_callback]
     )
 
     # train

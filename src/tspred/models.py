@@ -46,29 +46,45 @@ class TimeseriesEstimator(pl.LightningModule):
             betas = self.optimizer_hparams['betas'],
             eps = self.optimizer_hparams['eps']
         )
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer = optimizer,
+            mode = 'min', # default
+            min_lr = self.optimizer_hparams['min_lr'],
+            factor = self.optimizer_hparams['factor'],
+            patience = self.optimizer_hparams['patience'],
+            cooldown = self.optimizer_hparams['cooldown']
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": 'avg_valid_loss'
+            }
+        }
 
-    def _step(self,batch,batch_idx):
+    def _step(self,batch,batch_idx,step_key):
         src, trg = batch
-        if src.isnan().sum() > 0:
-            print('nan values found in sample')
-            breakpoint()
-            #TODO: get rid of this once you've cleared the src values
         pred = self(src)
         loss, loss_dict = self.loss(pred, trg)
+        self.log(f'{step_key}_loss', loss)
         return loss, loss_dict
 
     def training_step(self, batch, batch_idx):
-        loss, loss_dict = self._step(batch, batch_idx)
+        loss, loss_dict = self._step(batch, batch_idx, 'train')
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, loss_dict = self._step(batch, batch_idx)
+        loss, loss_dict = self._step(batch, batch_idx, 'valid')
         return loss
+
+    def validation_epoch_end(self, outputs):
+        avg_loss = torch.stack(outputs).mean()
+        self.log('avg_valid_loss',avg_loss)
+        return super().validation_epoch_end(outputs)
 
     def test_step(self, batch, batch_idx):
         # model.eval() and torch.no_grad() are set before this hook is called.
-        loss, loss_dict = self._step(batch, batch_idx)
+        loss, loss_dict = self._step(batch, batch_idx, 'test')
         #TODO: add all other evaluation metrics here, do a nice composition here for those methods
         # I will need to expand the _step() method to return the estimates for spectral estimates
         return loss
@@ -578,6 +594,7 @@ class Lfads(TimeseriesEstimator):
 
     def validation_epoch_end(self, outputs):
         # update KL, L2 weight scales here
+        super().validation_epoch_end(outputs)
         self.update_kl_weight(self.current_epoch)
         self.update_l2_weight(self.current_epoch)
 
