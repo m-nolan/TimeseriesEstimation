@@ -435,10 +435,7 @@ class LfadsCellModifiedGru(nn.Module):
             gen_out (torch.Tensor): LfadsCell generator outputs
             generator_ic_params (torch.Tensor): n_batch x _ generator IC distribution parameters. Used for KL div. regularization
         """
-        if len(src.shape) > 3:
-            _, batch_size, seq_len, input_size = src.shape
-        else:
-            batch_size, seq_len, input_size = src.shape
+        batch_size, seq_len, input_size = src.shape
         enc_out, enc_last = self.encoder(src)
         # enc_last = self.dropout(enc_last)
         enc_last = enc_last.permute(1,0,2).reshape(batch_size,-1)
@@ -572,6 +569,8 @@ class Lfads(TimeseriesEstimator):
         Returns:
             pred (torch.tensor): LFADS signal estimate. Depending on the training task, this may be a reconstruction of the input src or a prediction of a separate target output (trg).
         """
+        if len(src.shape) > 3:
+            src = src.squeeze(0)
         gen_out, generator_ic_params = self.lfads_cell(src)
         out = self.gen2out(gen_out)
         return LfadsOutput(out, generator_ic_params)
