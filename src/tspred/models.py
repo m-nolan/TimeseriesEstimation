@@ -435,7 +435,10 @@ class LfadsCellModifiedGru(nn.Module):
             gen_out (torch.Tensor): LfadsCell generator outputs
             generator_ic_params (torch.Tensor): n_batch x _ generator IC distribution parameters. Used for KL div. regularization
         """
-        batch_size, seq_len, input_size = src.shape
+        if len(src.shape) > 3:
+            _, batch_size, seq_len, input_size = src.shape
+        else:
+            batch_size, seq_len, input_size = src.shape
         enc_out, enc_last = self.encoder(src)
         # enc_last = self.dropout(enc_last)
         enc_last = enc_last.permute(1,0,2).reshape(batch_size,-1)
