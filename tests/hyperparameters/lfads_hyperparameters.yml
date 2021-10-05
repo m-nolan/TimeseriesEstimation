@@ -31,14 +31,14 @@ objective: #TODO: rename this?
   kl:
     weight : 0.0
     min: 0.0
-    max: 0.05 # subject to hyperparameter optimization
-    schedule_dur: 1600
+    max: 0.0005 # subject to hyperparameter optimization
+    schedule_dur: 2000
     schedule_start: 0
   l2:
     weight: 0.0
     min: 0.0
-    max: 0.05
-    schedule_dur: 1600
+    max: 0.0005
+    schedule_dur: 2000
     schedule_start: 0.0
 
 # ADAM optimizer hyperparameters

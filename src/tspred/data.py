@@ -117,9 +117,9 @@ class SrcTrgDataset(Dataset):
     def __getitem__(self, index):
         with h5py.File(self.file_path,'r') as hf:
             sample  = hf[self.data_key][index,:,:]
-        src = torch.tensor(sample[:self.src_len])
+        src = torch.tensor(sample[...,:self.src_len,:])
         if self.mode == 'recon':
-            trg = torch.tensor(sample[:self.trg_len])
+            trg = src
         elif self.mode == 'pred':
             trg = torch.tensor(sample[self.src_len:(self.src_len+self.trg_len)])
         return (src, trg)

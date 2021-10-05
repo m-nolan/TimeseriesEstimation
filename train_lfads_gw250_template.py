@@ -77,7 +77,7 @@ def main():
     # set, create experiment directory
     root_dir = tspred.utils.create_model_pathstr(hparams)
     root_dir = os.path.join(cl_args.root_dir,root_dir)
-    Path(root_dir).mkdir(mode = 0o007, parents=True, exist_ok=True)
+    Path(root_dir).mkdir(mode = 0o777, parents=True, exist_ok=True)
     
     # create datamodule
     gw250 = get_gw250_datamodule(hparams)
@@ -107,6 +107,7 @@ def main():
         max_epochs = hparams['trainer']['max_epochs'],
         default_root_dir = root_dir,
         gpus = gpus,
+        replace_sampler_ddp = False,
         callbacks=[checkpoint_callback, early_stopping_callback]
     )
 

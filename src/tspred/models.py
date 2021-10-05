@@ -64,6 +64,10 @@ class TimeseriesEstimator(pl.LightningModule):
 
     def _step(self,batch,batch_idx,step_key):
         src, trg = batch
+        if len(src.shape) > 3:
+            src = src.squeeze(0)
+        if len(trg.shape) > 3:
+            trg = trg.squeeze(0)
         pred = self(src)
         loss, loss_dict = self.loss(pred, trg)
         self.log(f'{step_key}_loss', loss)
