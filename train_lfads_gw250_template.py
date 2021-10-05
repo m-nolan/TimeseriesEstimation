@@ -28,7 +28,12 @@ def load_hyperparameters(hparam_filepath):
         return yaml.load(hpf, Loader=yaml.Loader)
     
 def get_gw250_datamodule(hparams):
-    return tspred.data.GW250(
+    # return tspred.data.GW250(
+    #     src_len = hparams['datamodule']['src_len'], 
+    #     trg_len = hparams['datamodule']['trg_len'], 
+    #     batch_size = hparams['datamodule']['batch_size'],
+    # )
+    return tspred.data.GW250_v2(
         src_len = hparams['datamodule']['src_len'], 
         trg_len = hparams['datamodule']['trg_len'], 
         batch_size = hparams['datamodule']['batch_size'],
