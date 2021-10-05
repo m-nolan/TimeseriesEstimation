@@ -7,6 +7,7 @@ Utility functions supporting TimeseriesPrediction model code.
 # utils.py
 
 import os
+import re
 
 def create_model_pathstr(hparams):
     """create_model_pathstr

@@ -8,6 +8,7 @@ module containing dataclass, dataset, and dataloader definitions for tspred mode
 
 import h5py
 import os
+import platform
 from dataclasses import dataclass
 from abc import ABC
 import torch
@@ -204,7 +205,11 @@ class GW250_v2(pl.LightningDataModule):
         self.trg_len    = trg_len
         self.batch_size = batch_size
         # this is a hdf5 dataset with the following items (flat structure): dt, train_data, valid_data, test_data.
-        file_path       = "D:\\Users\\mickey\\Data\\datasets\\ecog\\goose_wireless\\gw_250_v2"
+        sys_platform = platform.system()
+        if sys_platform == 'Windows': # home computer
+            file_path       = r"D:\Users\mickey\Data\datasets\ecog\goose_wireless\gw_250_v2"
+        if sys_platform == 'Linux': # ws5
+            file_path       = r'/home/ws5/manolan/data/datasets/ecog/goose_wireless/gw_250_v2'
         self.file_path  = file_path
         with h5py.File(self.file_path,'r') as hf:
             self.dims = hf['ecog'].shape
